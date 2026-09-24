@@ -221,7 +221,7 @@
                     log(`✓ FILE DECRYPTED SUCCESS!\nRestored Size: ${decryptedBytes.length} bytes\nTime: ${(endTime - startTime).toFixed(2)} ms\n\nDownloading restored file...`);
                     triggerDownload(decryptedBytes, originalName, 'application/octet-stream');
                 } catch (e) {
-                    log(`ACCESS DENIED: ${e}`);
+                    log(`❌ ${e}`);
                 }
             });
         }
@@ -296,8 +296,7 @@
 
                     log(`✓ DECRYPTED ITEM:\n\nTITLE: ${payload.title}\nSECRET:\n${payload.secret}`);
                 } catch (e) {
-                    log(`ACCESS DENIED: Incorrect passphrase or corrupted payload.`);
-                }
+                    log(`❌ ACCESS DENIED: Incorrect passphrase or corrupted payload.`);                }
             };
         };
 
