@@ -1,8 +1,8 @@
+// vault.worker.js
 import init, { encrypt_bytes, decrypt_bytes } from './pkg/bs_securevault.js';
 
 let isWasmInitialized = false;
 
-// Initialize WASM core upon worker spawning
 async function initWasm() {
     try {
         await init();
@@ -26,10 +26,14 @@ self.onmessage = async (e) => {
         if (type === 'ENCRYPT') {
             const { dataBytes, passBytes } = payload;
             const startTime = performance.now();
+            
+            // Rust WASM Encryption
             const encrypted = encrypt_bytes(dataBytes, passBytes);
             const duration = performance.now() - startTime;
 
-            // Transfer ArrayBuffer back to avoid structured clone overhead
+            // Zeroize passphrase copy in worker memory
+            if (passBytes && passBytes.fill) passBytes.fill(0);
+
             self.postMessage({
                 id,
                 type: 'ENCRYPT_SUCCESS',
@@ -40,8 +44,12 @@ self.onmessage = async (e) => {
         } else if (type === 'DECRYPT') {
             const { dataBytes, passBytes } = payload;
             const startTime = performance.now();
+
+            // Rust WASM Decryption
             const decrypted = decrypt_bytes(dataBytes, passBytes);
             const duration = performance.now() - startTime;
+
+            if (passBytes && passBytes.fill) passBytes.fill(0);
 
             self.postMessage({
                 id,

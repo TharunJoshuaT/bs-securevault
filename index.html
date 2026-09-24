@@ -103,6 +103,8 @@
     </div>
 
     <script type="module">
+        import { encryptLargeFileWithWasm, decryptLargeFileWithWasm } from './stream-engine.js';
+
         let currentTextCipherBytes = null;
         let db = null;
         let worker = null;
@@ -158,10 +160,45 @@
             };
         }
 
+        // --- 3-MINUTE INACTIVITY & MEMORY ZEROIZATION MONITOR ---
+        let autoLockTimer = null;
+        const INACTIVITY_LIMIT_MS = 3 * 60 * 1000; // 3 Minutes
+
+        function resetInactivityTimer() {
+            if (autoLockTimer) clearTimeout(autoLockTimer);
+            autoLockTimer = setTimeout(lockAndZeroizeVault, INACTIVITY_LIMIT_MS);
+        }
+
+        function lockAndZeroizeVault() {
+            const passInput = document.getElementById('passphrase');
+            const textInput = document.getElementById('textPayload');
+
+            if (passInput) passInput.value = '';
+            if (textInput) textInput.value = '';
+
+            currentTextCipherBytes = null;
+            log("🔒 VAULT AUTO-LOCKED: Inactivity threshold (3m) reached. Passphrase and memory state zeroized.");
+        }
+
+        function initAutoLockMonitor() {
+            ['mousemove', 'keydown', 'touchstart', 'scroll'].forEach(evt => {
+                window.addEventListener(evt, resetInactivityTimer, { passive: true });
+            });
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    lockAndZeroizeVault();
+                }
+            });
+
+            resetInactivityTimer();
+        }
+
         // --- MAIN BOOTSTRAP ---
         function start() {
             initWorker();
             initDB();
+            initAutoLockMonitor();
             setupDropzone('encryptDropzone', 'fileToEncrypt', 'encryptDropText');
             setupDropzone('decryptDropzone', 'fileToDecrypt', 'decryptDropText');
 
@@ -228,7 +265,7 @@
                 }
             });
 
-            // --- FILE ENCRYPTION ---
+            // --- STREAM FILE ENCRYPTION ---
             document.getElementById('encryptFileBtn').addEventListener('click', async () => {
                 const password = document.getElementById('passphrase').value;
                 const fileInput = document.getElementById('fileToEncrypt').files[0];
@@ -236,26 +273,25 @@
                 if (!password) return log("Error: Passphrase required.");
                 if (!fileInput) return log("Error: Select or drop a file first.");
 
-                log(`Processing file "${fileInput.name}" (${fileInput.size} bytes) in background worker...`);
-
-                const arrayBuffer = await fileInput.arrayBuffer();
-                const fileBytes = new Uint8Array(arrayBuffer);
-                const passBytes = new TextEncoder().encode(password);
+                log(`Starting stream encryption for "${fileInput.name}" (${(fileInput.size / (1024 * 1024)).toFixed(2)} MB)...`);
 
                 try {
-                    const { result, duration } = await runInWorker('ENCRYPT', {
-                        dataBytes: fileBytes,
-                        passBytes: passBytes
-                    }, [fileBytes.buffer, passBytes.buffer]);
+                    const savedName = await encryptLargeFileWithWasm({
+                        file: fileInput,
+                        password: password,
+                        worker: worker,
+                        onProgress: (progress) => {
+                            log(`Encrypting: ${progress.percent}% (${progress.speedMBps} MB/s) | Chunk ${progress.chunkCurrent}/${progress.chunkTotal}`);
+                        }
+                    });
 
-                    log(`✓ FILE ENCRYPTED SUCCESS!\nFile: ${fileInput.name}\nSize: ${result.length} bytes\nWorker Time: ${duration} ms\n\nDownloading package (.bsv)...`);
-                    triggerDownload(result, `${fileInput.name}.bsv`, 'application/octet-stream');
-                } catch (e) {
-                    log(`Error: ${e.message}`);
+                    log(`✓ SUCCESS: Encrypted and streamed directly to disk as "${savedName}"`);
+                } catch (err) {
+                    log(`❌ Error: ${err.message}`);
                 }
             });
 
-            // --- FILE DECRYPTION ---
+            // --- STREAM FILE DECRYPTION ---
             document.getElementById('decryptFileBtn').addEventListener('click', async () => {
                 const password = document.getElementById('passphrase').value;
                 const fileInput = document.getElementById('fileToDecrypt').files[0];
@@ -263,25 +299,21 @@
                 if (!password) return log("Error: Passphrase required.");
                 if (!fileInput) return log("Error: Select or drop a .bsv file first.");
 
-                log(`Decrypting file "${fileInput.name}" in background worker...`);
-
-                const arrayBuffer = await fileInput.arrayBuffer();
-                const encryptedBytes = new Uint8Array(arrayBuffer);
-                const passBytes = new TextEncoder().encode(password);
+                log(`Starting stream decryption for "${fileInput.name}" (${(fileInput.size / (1024 * 1024)).toFixed(2)} MB)...`);
 
                 try {
-                    const { result, duration } = await runInWorker('DECRYPT', {
-                        dataBytes: encryptedBytes,
-                        passBytes: passBytes
-                    }, [encryptedBytes.buffer, passBytes.buffer]);
+                    const restoredName = await decryptLargeFileWithWasm({
+                        file: fileInput,
+                        password: password,
+                        worker: worker,
+                        onProgress: (progress) => {
+                            log(`Decrypting: ${progress.percent}% (${progress.speedMBps} MB/s) | Chunk ${progress.chunkCurrent}/${progress.chunkTotal}`);
+                        }
+                    });
 
-                    let originalName = fileInput.name.replace(/\.bsv$/, '');
-                    if (originalName === fileInput.name) originalName = "decrypted_file";
-
-                    log(`✓ FILE DECRYPTED SUCCESS!\nRestored Size: ${result.length} bytes\nWorker Time: ${duration} ms\n\nDownloading restored file...`);
-                    triggerDownload(result, originalName, 'application/octet-stream');
-                } catch (e) {
-                    log(`❌ ${e.message}`);
+                    log(`✓ SUCCESS: Decrypted and restored directly to disk as "${restoredName}"`);
+                } catch (err) {
+                    log(`❌ Error: ${err.message}`);
                 }
             });
 
