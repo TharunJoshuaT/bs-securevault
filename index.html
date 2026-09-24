@@ -103,13 +103,48 @@
     </div>
 
     <script type="module">
-        import init, { encrypt_bytes, decrypt_bytes } from './pkg/bs_securevault.js';
-
         let currentTextCipherBytes = null;
         let db = null;
+        let worker = null;
+        const workerCallbacks = new Map();
+        let callbackIdCounter = 0;
 
+        // --- WORKER IPC PROTOCOL ---
+        function initWorker() {
+            worker = new Worker('vault.worker.js', { type: 'module' });
+
+            worker.onmessage = (e) => {
+                const { id, type, result, duration, error } = e.data;
+
+                if (type === 'READY') {
+                    log("✓ WASM Worker Online (Background Thread). Zero-knowledge DB ready.");
+                    return;
+                }
+
+                if (workerCallbacks.has(id)) {
+                    const { resolve, reject } = workerCallbacks.get(id);
+                    workerCallbacks.delete(id);
+
+                    if (type === 'ERROR') {
+                        reject(new Error(error));
+                    } else {
+                        resolve({ result, duration });
+                    }
+                }
+            };
+        }
+
+        function runInWorker(type, payload, transferables = []) {
+            return new Promise((resolve, reject) => {
+                const id = ++callbackIdCounter;
+                workerCallbacks.set(id, { resolve, reject });
+                worker.postMessage({ id, type, payload }, transferables);
+            });
+        }
+
+        // --- INDEXEDDB INIT ---
         function initDB() {
-            const request = indexedDB.open('BSSecureVaultDB', 2); // Version 2 upgrade
+            const request = indexedDB.open('BSSecureVaultDB', 2);
             request.onupgradeneeded = (e) => {
                 db = e.target.result;
                 if (db.objectStoreNames.contains('vault_items')) {
@@ -123,16 +158,15 @@
             };
         }
 
-        async function startWasm() {
-            await init();
+        // --- MAIN BOOTSTRAP ---
+        function start() {
+            initWorker();
             initDB();
-            log("✓ WASM Core Online. Zero-knowledge local DB active.");
-
             setupDropzone('encryptDropzone', 'fileToEncrypt', 'encryptDropText');
             setupDropzone('decryptDropzone', 'fileToDecrypt', 'decryptDropText');
 
-            // --- TEXT ENCRYPTION (DISPLAY ONLY) ---
-            document.getElementById('encryptTextBtn').addEventListener('click', () => {
+            // --- TEXT ENCRYPTION ---
+            document.getElementById('encryptTextBtn').addEventListener('click', async () => {
                 const password = document.getElementById('passphrase').value;
                 const text = document.getElementById('textPayload').value;
 
@@ -143,18 +177,20 @@
                 const passBytes = new TextEncoder().encode(password);
 
                 try {
-                    const startTime = performance.now();
-                    currentTextCipherBytes = encrypt_bytes(textBytes, passBytes);
-                    const endTime = performance.now();
+                    const { result, duration } = await runInWorker('ENCRYPT', {
+                        dataBytes: textBytes,
+                        passBytes: passBytes
+                    }, [textBytes.buffer, passBytes.buffer]);
 
-                    log(`✓ TEXT ENCRYPTED SUCCESS (${currentTextCipherBytes.length} Bytes | ${(endTime - startTime).toFixed(2)} ms):\n\n${Array.from(currentTextCipherBytes).join(',')}`);
+                    currentTextCipherBytes = result;
+                    log(`✓ TEXT ENCRYPTED SUCCESS (${result.length} Bytes | ${duration} ms):\n\n${Array.from(result).join(',')}`);
                 } catch (e) {
-                    log(`Error: ${e}`);
+                    log(`Error: ${e.message}`);
                 }
             });
 
-            // --- ZERO-KNOWLEDGE SAVE TO INDEXEDDB (ENCRYPTS TITLE + CONTENT) ---
-            document.getElementById('saveVaultBtn').addEventListener('click', () => {
+            // --- SAVE TO INDEXEDDB ---
+            document.getElementById('saveVaultBtn').addEventListener('click', async () => {
                 if (!db) return log("Error: Local database initializing, please wait...");
                 const password = document.getElementById('passphrase').value;
                 const title = document.getElementById('noteTitle').value || "Untitled Note";
@@ -163,18 +199,21 @@
                 if (!password) return log("Error: Passphrase required.");
                 if (!text) return log("Error: Enter text content to save.");
 
-                // Pack title and secret content together into JSON
-                const payloadObject = JSON.stringify({ title: title, secret: text });
+                const payloadObject = JSON.stringify({ title, secret: text });
                 const payloadBytes = new TextEncoder().encode(payloadObject);
                 const passBytes = new TextEncoder().encode(password);
 
                 try {
-                    const encryptedBytes = encrypt_bytes(payloadBytes, passBytes);
+                    const { result } = await runInWorker('ENCRYPT', {
+                        dataBytes: payloadBytes,
+                        passBytes: passBytes
+                    }, [payloadBytes.buffer, passBytes.buffer]);
+
                     const transaction = db.transaction(['vault_items'], 'readwrite');
                     const store = transaction.objectStore('vault_items');
 
                     store.add({
-                        data: Array.from(encryptedBytes),
+                        data: Array.from(result),
                         timestamp: new Date().toLocaleString()
                     });
 
@@ -185,7 +224,7 @@
                         document.getElementById('noteTitle').value = '';
                     };
                 } catch (e) {
-                    log(`Error saving: ${e}`);
+                    log(`Error saving: ${e.message}`);
                 }
             });
 
@@ -197,21 +236,22 @@
                 if (!password) return log("Error: Passphrase required.");
                 if (!fileInput) return log("Error: Select or drop a file first.");
 
-                log(`Processing file "${fileInput.name}" (${fileInput.size} bytes)...`);
+                log(`Processing file "${fileInput.name}" (${fileInput.size} bytes) in background worker...`);
 
                 const arrayBuffer = await fileInput.arrayBuffer();
                 const fileBytes = new Uint8Array(arrayBuffer);
                 const passBytes = new TextEncoder().encode(password);
 
                 try {
-                    const startTime = performance.now();
-                    const encryptedBytes = encrypt_bytes(fileBytes, passBytes);
-                    const endTime = performance.now();
+                    const { result, duration } = await runInWorker('ENCRYPT', {
+                        dataBytes: fileBytes,
+                        passBytes: passBytes
+                    }, [fileBytes.buffer, passBytes.buffer]);
 
-                    log(`✓ FILE ENCRYPTED SUCCESS!\nFile: ${fileInput.name}\nSize: ${encryptedBytes.length} bytes\nTime: ${(endTime - startTime).toFixed(2)} ms\n\nDownloading package (.bsv)...`);
-                    triggerDownload(encryptedBytes, `${fileInput.name}.bsv`, 'application/octet-stream');
+                    log(`✓ FILE ENCRYPTED SUCCESS!\nFile: ${fileInput.name}\nSize: ${result.length} bytes\nWorker Time: ${duration} ms\n\nDownloading package (.bsv)...`);
+                    triggerDownload(result, `${fileInput.name}.bsv`, 'application/octet-stream');
                 } catch (e) {
-                    log(`Error: ${e}`);
+                    log(`Error: ${e.message}`);
                 }
             });
 
@@ -223,28 +263,29 @@
                 if (!password) return log("Error: Passphrase required.");
                 if (!fileInput) return log("Error: Select or drop a .bsv file first.");
 
-                log(`Decrypting file "${fileInput.name}"...`);
+                log(`Decrypting file "${fileInput.name}" in background worker...`);
 
                 const arrayBuffer = await fileInput.arrayBuffer();
                 const encryptedBytes = new Uint8Array(arrayBuffer);
                 const passBytes = new TextEncoder().encode(password);
 
                 try {
-                    const startTime = performance.now();
-                    const decryptedBytes = decrypt_bytes(encryptedBytes, passBytes);
-                    const endTime = performance.now();
+                    const { result, duration } = await runInWorker('DECRYPT', {
+                        dataBytes: encryptedBytes,
+                        passBytes: passBytes
+                    }, [encryptedBytes.buffer, passBytes.buffer]);
 
                     let originalName = fileInput.name.replace(/\.bsv$/, '');
                     if (originalName === fileInput.name) originalName = "decrypted_file";
 
-                    log(`✓ FILE DECRYPTED SUCCESS!\nRestored Size: ${decryptedBytes.length} bytes\nTime: ${(endTime - startTime).toFixed(2)} ms\n\nDownloading restored file...`);
-                    triggerDownload(decryptedBytes, originalName, 'application/octet-stream');
+                    log(`✓ FILE DECRYPTED SUCCESS!\nRestored Size: ${result.length} bytes\nWorker Time: ${duration} ms\n\nDownloading restored file...`);
+                    triggerDownload(result, originalName, 'application/octet-stream');
                 } catch (e) {
-                    log(`❌ ${e}`);
+                    log(`❌ ${e.message}`);
                 }
             });
 
-            // --- EXPORT VAULT BUNDLE (.bsv-bundle) ---
+            // --- EXPORT VAULT BUNDLE ---
             document.getElementById('exportVaultBtn').addEventListener('click', () => {
                 if (!db) return log("Error: Local database initializing, please wait...");
                 const password = document.getElementById('passphrase').value;
@@ -268,16 +309,20 @@
                     const passBytes = new TextEncoder().encode(password);
 
                     try {
-                        const encryptedBundle = encrypt_bytes(packageBytes, passBytes);
-                        triggerDownload(encryptedBundle, `BS_Vault_Backup_${Date.now()}.bsv-bundle`, 'application/octet-stream');
+                        const { result } = await runInWorker('ENCRYPT', {
+                            dataBytes: packageBytes,
+                            passBytes: passBytes
+                        }, [packageBytes.buffer, passBytes.buffer]);
+
+                        triggerDownload(result, `BS_Vault_Backup_${Date.now()}.bsv-bundle`, 'application/octet-stream');
                         log(`✓ EXPORT SUCCESS: Downloaded encrypted bundle containing ${items.length} items.`);
                     } catch (e) {
-                        log(`Export Error: ${e}`);
+                        log(`Export Error: ${e.message}`);
                     }
                 };
             });
 
-            // --- IMPORT VAULT BUNDLE (.bsv-bundle) ---
+            // --- IMPORT VAULT BUNDLE ---
             document.getElementById('importVaultBtn').addEventListener('click', () => {
                 document.getElementById('bundleFileInput').click();
             });
@@ -297,8 +342,12 @@
                 const passBytes = new TextEncoder().encode(password);
 
                 try {
-                    const decryptedBytes = decrypt_bytes(encryptedBytes, passBytes);
-                    const jsonString = new TextDecoder().decode(decryptedBytes);
+                    const { result } = await runInWorker('DECRYPT', {
+                        dataBytes: encryptedBytes,
+                        passBytes: passBytes
+                    }, [encryptedBytes.buffer, passBytes.buffer]);
+
+                    const jsonString = new TextDecoder().decode(result);
                     const bundle = JSON.parse(jsonString);
 
                     if (!bundle.items || !Array.isArray(bundle.items)) {
@@ -310,7 +359,7 @@
 
                     let importedCount = 0;
                     bundle.items.forEach(item => {
-                        delete item.id; // Allow autoIncrement to generate new IDs
+                        delete item.id;
                         store.add(item);
                         importedCount++;
                     });
@@ -375,7 +424,7 @@
             };
         }
 
-        window.decryptStoredItem = (id) => {
+        window.decryptStoredItem = async (id) => {
             if (!db) return log("Error: Database not ready.");
             const password = document.getElementById('passphrase').value;
             if (!password) return log("Error: Type your passphrase above first to unlock this item.");
@@ -384,14 +433,18 @@
             const store = transaction.objectStore('vault_items');
             const request = store.get(id);
 
-            request.onsuccess = () => {
+            request.onsuccess = async () => {
                 const item = request.result;
                 const encryptedBytes = new Uint8Array(item.data);
                 const passBytes = new TextEncoder().encode(password);
 
                 try {
-                    const decryptedBytes = decrypt_bytes(encryptedBytes, passBytes);
-                    const jsonString = new TextDecoder().decode(decryptedBytes);
+                    const { result } = await runInWorker('DECRYPT', {
+                        dataBytes: encryptedBytes,
+                        passBytes: passBytes
+                    }, [encryptedBytes.buffer, passBytes.buffer]);
+
+                    const jsonString = new TextDecoder().decode(result);
                     const payload = JSON.parse(jsonString);
 
                     log(`✓ DECRYPTED ITEM:\n\nTITLE: ${payload.title}\nSECRET:\n${payload.secret}`);
@@ -411,7 +464,7 @@
 
         function triggerDownload(bytes, filename, mimeType) {
             const blob = new Blob([bytes], { type: mimeType });
-            const link = document.createElement('a');
+            const link = document.getElementById('downloadLink') || document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = filename;
             link.click();
@@ -422,8 +475,9 @@
             document.getElementById('output').value = msg;
         }
 
-        startWasm();
+        start();
     </script>
+    
     <script>
         // Security Auto-Lock Monitor (3-Minute Inactivity Timeout)
         (function initAutoLock() {
