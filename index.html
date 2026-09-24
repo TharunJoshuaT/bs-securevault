@@ -11,29 +11,9 @@
         label { display: block; font-size: 0.85rem; font-weight: 600; margin-top: 1rem; color: #8b949e; }
         input, button, textarea { width: 100%; padding: 0.75rem; margin-top: 0.4rem; background: #161b22; border: 1px solid #30363d; color: #fff; border-radius: 6px; box-sizing: border-box; font-family: monospace; }
         input[type="file"] { font-family: system-ui; cursor: pointer; display: none; }
-        .dropzone {
-            border: 2px dashed #30363d;
-            padding: 1.5rem;
-            text-align: center;
-            border-radius: 6px;
-            background: #0d1117;
-            cursor: pointer;
-            margin-top: 0.5rem;
-            transition: border-color 0.2s, background 0.2s;
-            max-width: 100%;
-            overflow: hidden;
-        }
+        .dropzone { border: 2px dashed #30363d; padding: 1.5rem; text-align: center; border-radius: 6px; background: #0d1117; cursor: pointer; margin-top: 0.5rem; transition: border-color 0.2s, background 0.2s; max-width: 100%; overflow: hidden; }
         .dropzone:hover, .dropzone.dragover { border-color: #58a6ff; background: #161b22; }
-        .dropzone-text {
-            color: #8b949e;
-            font-size: 0.85rem;
-            display: block;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 100%;
-            padding: 0 0.5rem;
-        }
+        .dropzone-text { color: #8b949e; font-size: 0.85rem; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; padding: 0 0.5rem; }
         button { background: #238636; cursor: pointer; font-weight: bold; border: none; margin-top: 0.8rem; font-family: system-ui; transition: background 0.2s; }
         button:hover { background: #2ea043; }
         .btn-decrypt { background: #1f6beb; }
@@ -61,15 +41,15 @@
     <!-- Section 1: Text Vault -->
     <div class="box">
         <div class="section-title">1. Direct Text & Secret Note Vault</div>
-        <label>Text Payload / Note Title:</label>
+        <label>Note Title:</label>
         <input type="text" id="noteTitle" placeholder="Title (e.g., API Keys, Server Secrets)">
         
         <label style="margin-top: 0.8rem;">Secret Content:</label>
         <textarea id="textPayload" rows="3" placeholder="Type or paste confidential text/keys here..."></textarea>
         
         <div class="grid">
-            <button id="encryptTextBtn">Encrypt & Display</button>
-            <button id="saveVaultBtn">Encrypt & Save to Local Vault (DB)</button>
+            <button id="encryptTextBtn">Encrypt & Display Raw Bytes</button>
+            <button id="saveVaultBtn">Encrypt & Save (Zero-Knowledge DB)</button>
         </div>
     </div>
 
@@ -94,7 +74,7 @@
 
     <!-- Section 3: Persistent Local Vault -->
     <div class="box">
-        <div class="section-title">3. Persistent Local Vault Storage (IndexedDB)</div>
+        <div class="section-title">3. Zero-Knowledge Local Vault Storage (IndexedDB)</div>
         <div id="vaultList" style="font-size: 0.85rem; color: #8b949e;">No persistent items saved yet.</div>
     </div>
 
@@ -110,14 +90,14 @@
         let currentTextCipherBytes = null;
         let db = null;
 
-        // Initialize IndexedDB
         function initDB() {
-            const request = indexedDB.open('BSSecureVaultDB', 1);
+            const request = indexedDB.open('BSSecureVaultDB', 2); // Version 2 upgrade
             request.onupgradeneeded = (e) => {
                 db = e.target.result;
-                if (!db.objectStoreNames.contains('vault_items')) {
-                    db.createObjectStore('vault_items', { keyPath: 'id', autoIncrement: true });
+                if (db.objectStoreNames.contains('vault_items')) {
+                    db.deleteObjectStore('vault_items');
                 }
+                db.createObjectStore('vault_items', { keyPath: 'id', autoIncrement: true });
             };
             request.onsuccess = (e) => {
                 db = e.target.result;
@@ -128,13 +108,12 @@
         async function startWasm() {
             await init();
             initDB();
-            log("✓ WASM Core Online. Direct text, dropzone file processing, and local IndexedDB active.");
+            log("✓ WASM Core Online. Zero-knowledge local DB active.");
 
-            // --- DROPZONE HANDLERS ---
             setupDropzone('encryptDropzone', 'fileToEncrypt', 'encryptDropText');
             setupDropzone('decryptDropzone', 'fileToDecrypt', 'decryptDropText');
 
-            // --- TEXT ENCRYPTION ---
+            // --- TEXT ENCRYPTION (DISPLAY ONLY) ---
             document.getElementById('encryptTextBtn').addEventListener('click', () => {
                 const password = document.getElementById('passphrase').value;
                 const text = document.getElementById('textPayload').value;
@@ -156,7 +135,7 @@
                 }
             });
 
-            // --- SAVE TO INDEXEDDB ---
+            // --- ZERO-KNOWLEDGE SAVE TO INDEXEDDB (ENCRYPTS TITLE + CONTENT) ---
             document.getElementById('saveVaultBtn').addEventListener('click', () => {
                 const password = document.getElementById('passphrase').value;
                 const title = document.getElementById('noteTitle').value || "Untitled Note";
@@ -165,22 +144,23 @@
                 if (!password) return log("Error: Passphrase required.");
                 if (!text) return log("Error: Enter text content to save.");
 
-                const textBytes = new TextEncoder().encode(text);
+                // Pack title and secret content together into JSON
+                const payloadObject = JSON.stringify({ title: title, secret: text });
+                const payloadBytes = new TextEncoder().encode(payloadObject);
                 const passBytes = new TextEncoder().encode(password);
 
                 try {
-                    const encryptedBytes = encrypt_bytes(textBytes, passBytes);
+                    const encryptedBytes = encrypt_bytes(payloadBytes, passBytes);
                     const transaction = db.transaction(['vault_items'], 'readwrite');
                     const store = transaction.objectStore('vault_items');
 
                     store.add({
-                        title: title,
                         data: Array.from(encryptedBytes),
                         timestamp: new Date().toLocaleString()
                     });
 
                     transaction.oncomplete = () => {
-                        log(`✓ Saved "${title}" to Local IndexedDB Vault.`);
+                        log(`✓ Saved encrypted entry to Local Vault (Title & Content fully obscured).`);
                         loadLocalVault();
                         document.getElementById('textPayload').value = '';
                         document.getElementById('noteTitle').value = '';
@@ -246,7 +226,6 @@
             });
         }
 
-        // --- UI HELPERS ---
         function setupDropzone(zoneId, inputId, textId) {
             const zone = document.getElementById(zoneId);
             const input = document.getElementById(inputId);
@@ -282,10 +261,10 @@
                     return;
                 }
 
-                vaultList.innerHTML = items.map(item => `
+                vaultList.innerHTML = items.map((item, index) => `
                     <div class="vault-item">
                         <div class="vault-info">
-                            <strong>${item.title}</strong>
+                            <strong>🔒 Encrypted Item #${index + 1}</strong>
                             <div class="vault-date">${item.timestamp} • ${item.data.length} encrypted bytes</div>
                         </div>
                         <div>
@@ -312,10 +291,12 @@
 
                 try {
                     const decryptedBytes = decrypt_bytes(encryptedBytes, passBytes);
-                    const text = new TextDecoder().decode(decryptedBytes);
-                    log(`✓ DECRYPTED ITEM ["${item.title}"]:\n\n${text}`);
+                    const jsonString = new TextDecoder().decode(decryptedBytes);
+                    const payload = JSON.parse(jsonString);
+
+                    log(`✓ DECRYPTED ITEM:\n\nTITLE: ${payload.title}\nSECRET:\n${payload.secret}`);
                 } catch (e) {
-                    log(`ACCESS DENIED: Incorrect passphrase.`);
+                    log(`ACCESS DENIED: Incorrect passphrase or corrupted payload.`);
                 }
             };
         };
