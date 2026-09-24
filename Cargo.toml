@@ -17,3 +17,4 @@
  getrandom = { version = "0.2", features = ["js"] }
  clap = { version = "4.4", features = ["derive"] }
  rpassword = "7.3"
+ zeroize = "1.7"

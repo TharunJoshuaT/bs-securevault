@@ -5,17 +5,15 @@ use aes_gcm::{
 };
 use argon2::{Argon2, ParamsBuilder};
 use getrandom::getrandom;
+use zeroize::Zeroize;
 
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
 
-/// Derive a 256-bit key using OWASP-recommended Argon2id parameters
 fn derive_key_argon2id(passphrase: &[u8], salt: &[u8]) -> Result<[u8; KEY_LEN], String> {
     let mut key = [0u8; KEY_LEN];
 
-    // Browser-optimized Argon2id Parameters:
-    // m_cost = 19456 KiB (~19 MB RAM), t_cost = 2 passes, p_cost = 1 thread
     let params = ParamsBuilder::new()
         .m_cost(19456)
         .t_cost(2)
@@ -39,25 +37,25 @@ fn derive_key_argon2id(passphrase: &[u8], salt: &[u8]) -> Result<[u8; KEY_LEN], 
 
 #[wasm_bindgen]
 pub fn encrypt_bytes(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, JsValue> {
-    // Generate secure random 16-byte Salt and 12-byte Nonce
     let mut salt = [0u8; SALT_LEN];
     getrandom(&mut salt).map_err(|e| JsValue::from_str(&format!("Salt RNG failed: {}", e)))?;
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
     getrandom(&mut nonce_bytes).map_err(|e| JsValue::from_str(&format!("Nonce RNG failed: {}", e)))?;
 
-    // Derive 256-bit key via Argon2id
-    let key = derive_key_argon2id(passphrase, &salt).map_err(|e| JsValue::from_str(&e))?;
-
+    // Derive key and zeroize key buffer immediately after cipher instantiation
+    let mut key = derive_key_argon2id(passphrase, &salt).map_err(|e| JsValue::from_str(&e))?;
     let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| JsValue::from_str(&format!("Cipher init failed: {}", e)))?;
+        .map_err(|e| JsValue::from_str(&format!("Cipher init failed: {}", e)));
+    
+    key.zeroize(); // Overwrite WASM key memory with zeroes
+    let cipher = cipher?;
 
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, data)
         .map_err(|e| JsValue::from_str(&format!("Encryption failed: {}", e)))?;
 
-    // Pack payload: [SALT (16B)] + [NONCE (12B)] + [CIPHERTEXT]
     let mut payload = Vec::with_capacity(SALT_LEN + NONCE_LEN + ciphertext.len());
     payload.extend_from_slice(&salt);
     payload.extend_from_slice(&nonce_bytes);
@@ -76,11 +74,13 @@ pub fn decrypt_bytes(payload: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, JsVal
     let nonce_bytes = &payload[SALT_LEN..SALT_LEN + NONCE_LEN];
     let ciphertext = &payload[SALT_LEN + NONCE_LEN..];
 
-    // Re-derive key with extracted salt
-    let key = derive_key_argon2id(passphrase, salt).map_err(|e| JsValue::from_str(&e))?;
-
+    // Derive key and zeroize key buffer immediately after cipher instantiation
+    let mut key = derive_key_argon2id(passphrase, salt).map_err(|e| JsValue::from_str(&e))?;
     let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| JsValue::from_str(&format!("Cipher init failed: {}", e)))?;
+        .map_err(|e| JsValue::from_str(&format!("Cipher init failed: {}", e)));
+
+    key.zeroize(); // Overwrite WASM key memory with zeroes
+    let cipher = cipher?;
 
     let nonce = Nonce::from_slice(nonce_bytes);
     let plaintext = cipher
