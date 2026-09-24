@@ -3,76 +3,125 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BS SecureVault — WASM Engine</title>
+    <title>BS SecureVault — File Encryption Engine</title>
     <style>
-        body { font-family: system-ui, -apple-system, sans-serif; background: #0d1117; color: #c9d1d9; padding: 2rem; max-width: 650px; margin: 0 auto; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #0d1117; color: #c9d1d9; padding: 2rem; max-width: 680px; margin: 0 auto; }
         h1 { color: #58a6ff; font-size: 1.6rem; margin-bottom: 0.2rem; }
         .subtitle { font-size: 0.85rem; color: #8b949e; margin-bottom: 1.5rem; }
         label { display: block; font-size: 0.85rem; font-weight: 600; margin-top: 1rem; color: #8b949e; }
         input, button, textarea { width: 100%; padding: 0.75rem; margin-top: 0.4rem; background: #161b22; border: 1px solid #30363d; color: #fff; border-radius: 6px; box-sizing: border-box; font-family: monospace; }
-        button { background: #238636; cursor: pointer; font-weight: bold; border: none; margin-top: 1rem; font-family: system-ui; }
+        input[type="file"] { font-family: system-ui; cursor: pointer; }
+        button { background: #238636; cursor: pointer; font-weight: bold; border: none; margin-top: 1rem; font-family: system-ui; transition: background 0.2s; }
         button:hover { background: #2ea043; }
         .btn-decrypt { background: #1f6beb; }
         .btn-decrypt:hover { background: #388bfd; }
         .box { background: #161b22; padding: 1.25rem; border-radius: 8px; border: 1px solid #30363d; margin-top: 1rem; }
+        .flex { display: flex; gap: 1rem; }
     </style>
 </head>
 <body>
     <h1>BS SecureVault</h1>
-    <div class="subtitle">BS OS SE • In-Memory Client-Side AES-256-GCM Engine (WASM)</div>
+    <div class="subtitle">BS OS SE • Client-Side Zero-Knowledge File Encryption Engine (WASM)</div>
 
     <div class="box">
-        <label>32-Byte Secret Passphrase (256-bit):</label>
-        <input type="password" id="key" value="12345678901234567890123456789012">
+        <label>Master Passphrase:</label>
+        <input type="password" id="passphrase" placeholder="Enter secure password...">
 
-        <label>Input Payload:</label>
-        <textarea id="plaintext" rows="3">Hello from BS OS SE!</textarea>
-
-        <button id="encryptBtn">Encrypt in Rust WASM</button>
-        <button id="decryptBtn" class="btn-decrypt">Decrypt in Rust WASM</button>
+        <label style="margin-top: 1.2rem;">Select Any File to Encrypt (Images, PDFs, Docs, Zip):</label>
+        <input type="file" id="fileToEncrypt">
+        <button id="encryptFileBtn">Encrypt File & Download (.bsv)</button>
     </div>
 
     <div class="box">
-        <label>WASM Execution Output:</label>
-        <textarea id="output" rows="6" readonly placeholder="Initializing WASM core..."></textarea>
+        <label>Select Encrypted File (.bsv) to Decrypt:</label>
+        <input type="file" id="fileToDecrypt">
+        <button id="decryptFileBtn" class="btn-decrypt">Decrypt & Restore Original File</button>
+    </div>
+
+    <div class="box">
+        <label>Engine Output Log:</label>
+        <textarea id="output" rows="5" readonly placeholder="Initializing WASM core..."></textarea>
     </div>
 
     <script type="module">
         import init, { encrypt_bytes, decrypt_bytes } from './pkg/bs_securevault.js';
 
-        let encryptedBytes = null;
-
         async function startWasm() {
             await init();
-            document.getElementById('output').value = "✓ WASM Core Initialized Successfully.";
+            document.getElementById('output').value = "✓ WASM Core Ready. Zero-Knowledge engine online.";
 
-            document.getElementById('encryptBtn').addEventListener('click', () => {
-                const text = new TextEncoder().encode(document.getElementById('plaintext').value);
-                const key = new TextEncoder().encode(document.getElementById('key').value);
+            // --- FILE ENCRYPTION HANDLER ---
+            document.getElementById('encryptFileBtn').addEventListener('click', async () => {
+                const passwordInput = document.getElementById('passphrase').value;
+                const fileInput = document.getElementById('fileToEncrypt').files[0];
 
+                if (!passwordInput) return log("Error: Please provide a master passphrase.");
+                if (!fileInput) return log("Error: Please select a file to encrypt.");
+
+                log(`Reading "${fileInput.name}" (${fileInput.size} bytes)...`);
+                
+                const arrayBuffer = await fileInput.arrayBuffer();
+                const fileBytes = new Uint8Array(arrayBuffer);
+                const passwordBytes = new TextEncoder().encode(passwordInput);
+
+                const startTime = performance.now();
                 try {
-                    encryptedBytes = encrypt_bytes(text, key);
-                    document.getElementById('output').value = `✓ ENCRYPTED SUCCESS (${encryptedBytes.length} Bytes):\n\n${Array.from(encryptedBytes).join(',')}`;
+                    const encryptedBytes = encrypt_bytes(fileBytes, passwordBytes);
+                    const endTime = performance.now();
+
+                    log(`✓ ENCRYPTION SUCCESS!\nFile: ${fileInput.name}\nSize: ${encryptedBytes.length} bytes\nTime: ${(endTime - startTime).toFixed(2)} ms\n\nTriggering secure download...`);
+
+                    // Download encrypted package
+                    triggerDownload(encryptedBytes, `${fileInput.name}.bsv`, 'application/octet-stream');
                 } catch (e) {
-                    document.getElementById('output').value = `Error: ${e}`;
+                    log(`Encryption Failed: ${e}`);
                 }
             });
 
-            document.getElementById('decryptBtn').addEventListener('click', () => {
-                if (!encryptedBytes) {
-                    document.getElementById('output').value = "Error: Encrypt something first!";
-                    return;
-                }
-                const key = new TextEncoder().encode(document.getElementById('key').value);
+            // --- FILE DECRYPTION HANDLER ---
+            document.getElementById('decryptFileBtn').addEventListener('click', async () => {
+                const passwordInput = document.getElementById('passphrase').value;
+                const fileInput = document.getElementById('fileToDecrypt').files[0];
 
+                if (!passwordInput) return log("Error: Please provide a master passphrase.");
+                if (!fileInput) return log("Error: Please select a .bsv file to decrypt.");
+
+                log(`Reading encrypted file "${fileInput.name}"...`);
+
+                const arrayBuffer = await fileInput.arrayBuffer();
+                const encryptedBytes = new Uint8Array(arrayBuffer);
+                const passwordBytes = new TextEncoder().encode(passwordInput);
+
+                const startTime = performance.now();
                 try {
-                    const decrypted = decrypt_bytes(encryptedBytes, key);
-                    const text = new TextDecoder().decode(decrypted);
-                    document.getElementById('output').value = `✓ DECRYPTED SUCCESS:\n\n${text}`;
+                    const decryptedBytes = decrypt_bytes(encryptedBytes, passwordBytes);
+                    const endTime = performance.now();
+
+                    // Remove .bsv extension if present
+                    let originalName = fileInput.name.replace(/\.bsv$/, '');
+                    if (originalName === fileInput.name) originalName = "decrypted_file";
+
+                    log(`✓ DECRYPTION SUCCESS!\nRestored Size: ${decryptedBytes.length} bytes\nTime: ${(endTime - startTime).toFixed(2)} ms\n\nTriggering secure download...`);
+
+                    // Download restored file
+                    triggerDownload(decryptedBytes, originalName, 'application/octet-stream');
                 } catch (e) {
-                    document.getElementById('output').value = `Error: ${e}`;
+                    log(`ACCESS DENIED: ${e}`);
                 }
             });
+        }
+
+        function triggerDownload(bytes, filename, mimeType) {
+            const blob = new Blob([bytes], { type: mimeType });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
+        function log(message) {
+            document.getElementById('output').value = message;
         }
 
         startWasm();
