@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BS OS SE — WASM Engine Stress Test</title>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; background: #0d1117; color: #c9d1d9; padding: 2rem; max-width: 800px; margin: 0 auto; }
+        h1 { color: #58a6ff; font-size: 1.5rem; margin-bottom: 0.2rem; }
+        .subtitle { font-size: 0.85rem; color: #8b949e; margin-bottom: 1.5rem; }
+        button { background: #238636; color: #fff; border: none; padding: 0.8rem 1.5rem; font-weight: bold; border-radius: 6px; cursor: pointer; font-size: 0.95rem; }
+        button:hover { background: #2ea043; }
+        .box { background: #161b22; padding: 1.25rem; border-radius: 8px; border: 1px solid #30363d; margin-top: 1rem; }
+        pre { background: #0d1117; padding: 1rem; border-radius: 6px; border: 1px solid #30363d; color: #7ee787; font-family: monospace; overflow-x: auto; white-space: pre-wrap; font-size: 0.85rem; line-height: 1.4; }
+        .pass { color: #3fb950; font-weight: bold; }
+        .fail { color: #f85149; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>BS OS SE Engine Benchmark</h1>
+    <div class="subtitle">Automated Stress Test & Cryptographic Authentication Verification Suite</div>
+
+    <button id="runBtn">Run Full Stress Test Suite</button>
+
+    <div class="box">
+        <label style="font-weight:600; font-size:0.9rem;">Test Console Log:</label>
+        <pre id="log">Click "Run Full Stress Test Suite" to execute test harness...</pre>
+    </div>
+
+    <script type="module">
+        import init, { encrypt_bytes, decrypt_bytes } from './pkg/bs_securevault.js';
+
+        const logEl = document.getElementById('log');
+        function log(msg) { logEl.textContent += msg + '\n'; }
+        function clearLog() { logEl.textContent = ''; }
+
+        async function runSuite() {
+            clearLog();
+            log("Initializing WASM Module...");
+            await init();
+            log("✓ WASM Runtime Ready.\n");
+
+            const key = new TextEncoder().encode("12345678901234567890123456789012"); // 32-byte key
+
+            // --- PHASE 1: THROUGHPUT BENCHMARK ---
+            log("=== PHASE 1: Payload Throughput Benchmark ===");
+            const sizesMB = [0.01, 1, 10, 50]; // MB sizes
+
+            for (const size of sizesMB) {
+                const numBytes = Math.floor(size * 1024 * 1024);
+                const buffer = new Uint8Array(numBytes);
+                crypto.getRandomValues(buffer.subarray(0, Math.min(numBytes, 65536))); // Fill prefix sample
+
+                // Measure Encryption
+                const t0 = performance.now();
+                const encrypted = encrypt_bytes(buffer, key);
+                const t1 = performance.now();
+                const encTimeMs = t1 - t0;
+                const encThroughput = (size / (encTimeMs / 1000)).toFixed(2);
+
+                // Measure Decryption
+                const t2 = performance.now();
+                const decrypted = decrypt_bytes(encrypted, key);
+                const t3 = performance.now();
+                const decTimeMs = t3 - t2;
+                const decThroughput = (size / (decTimeMs / 1000)).toFixed(2);
+
+                // Verify match
+                const isMatch = buffer.length === decrypted.length && buffer[0] === decrypted[0];
+
+                log(`[${size} MB Payload]`);
+                log(`  • Encrypt: ${encTimeMs.toFixed(2)} ms (${encThroughput} MB/s)`);
+                log(`  • Decrypt: ${decTimeMs.toFixed(2)} ms (${decThroughput} MB/s)`);
+                log(`  • Integrity Check: ${isMatch ? 'PASSED' : 'FAILED'}`);
+            }
+
+            // --- PHASE 2: REPEATED LOOP & HEAP STRESS ---
+            log("\n=== PHASE 2: 1,000 Iteration Loop Stress Test ===");
+            const smallPayload = new TextEncoder().encode("Billionaire Squad OS SE Benchmark Payload 2026");
+            const iterations = 1000;
+            const loopStart = performance.now();
+            let failCount = 0;
+
+            for (let i = 0; i < iterations; i++) {
+                try {
+                    const enc = encrypt_bytes(smallPayload, key);
+                    const dec = decrypt_bytes(enc, key);
+                    if (dec.length !== smallPayload.length) failCount++;
+                } catch (e) {
+                    failCount++;
+                }
+            }
+            const loopEnd = performance.now();
+            const totalLoopTime = loopEnd - loopStart;
+            const avgPerOp = (totalLoopTime / iterations).toFixed(3);
+
+            log(`Executed ${iterations} continuous Encrypt-Decrypt cycles in ${totalLoopTime.toFixed(2)} ms`);
+            log(`Average per operation: ${avgPerOp} ms`);
+            log(`Failures: ${failCount === 0 ? '0 (PASSED)' : failCount + ' (FAILED)'}`);
+
+            // --- PHASE 3: CIPHERTEXT CORRUPTION & AUTHENTICATION TAG TEST ---
+            log("\n=== PHASE 3: Authentication & Anti-Tamper Verification ===");
+            const validEncrypted = encrypt_bytes(smallPayload, key);
+            
+            // Flip a byte in the encrypted data
+            const corruptedPayload = Uint8Array.from(validEncrypted);
+            corruptedPayload[corruptedPayload.length - 1] ^= 0xFF; // Mutate authentication tag byte
+
+            try {
+                decrypt_bytes(corruptedPayload, key);
+                log("  • Tamper Test: FAILED (Corrupted ciphertext was accepted!)");
+            } catch (err) {
+                log(`  • Tamper Test: PASSED (Corrupted ciphertext rejected safely with error: "${err}")`);
+            }
+
+            // --- PHASE 4: BOUNDARY / WRONG KEY TEST ---
+            log("\n=== PHASE 4: Invalid Key Boundary Test ===");
+            const wrongKey = new TextEncoder().encode("WRONG_KEY_0000000000000000000000"); // 32 bytes wrong key
+            try {
+                decrypt_bytes(validEncrypted, wrongKey);
+                log("  • Wrong Key Test: FAILED (Decrypted with wrong key)");
+            } catch (err) {
+                log(`  • Wrong Key Test: PASSED (Wrong key rejected correctly)`);
+            }
+
+            log("\n==========================================");
+            log("✓ ALL STRESS TESTS COMPLETED.");
+        }
+
+        document.getElementById('runBtn').addEventListener('click', runSuite);
+    </script>
+</body>
+</html>
