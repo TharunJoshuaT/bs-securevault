@@ -71,10 +71,17 @@
         </div>
         <button id="decryptFileBtn" class="btn-decrypt">Decrypt & Restore Original File</button>
     </div>
-
+    
     <!-- Section 3: Persistent Local Vault -->
-    <div class="box">
-        <div class="section-title">3. Zero-Knowledge Local Vault Storage (IndexedDB)</div>
+        <div class="box">
+            <div class="section-title">3. Zero-Knowledge Local Vault Storage (IndexedDB)</div>
+            <div class="grid" style="margin-bottom: 1rem;">
+                <button id="exportVaultBtn" style="background: #1f6beb;">📥 Export Encrypted Bundle (.bsv-bundle)</button>
+                <button id="importVaultBtn" style="background: #8957e5;">📤 Restore Bundle File</button>
+                <input type="file" id="bundleFileInput" accept=".bsv-bundle,.bsv" style="display:none;">
+            </div>
+            <div id="vaultList" style="font-size: 0.85rem; color: #8b949e;">No persistent items saved yet.</div>
+        </div>
         <div id="vaultList" style="font-size: 0.85rem; color: #8b949e;">No persistent items saved yet.</div>
     </div>
 
@@ -137,6 +144,7 @@
 
             // --- ZERO-KNOWLEDGE SAVE TO INDEXEDDB (ENCRYPTS TITLE + CONTENT) ---
             document.getElementById('saveVaultBtn').addEventListener('click', () => {
+                if (!db) return log("Error: Local database initializing, please wait...");
                 const password = document.getElementById('passphrase').value;
                 const title = document.getElementById('noteTitle').value || "Untitled Note";
                 const text = document.getElementById('textPayload').value;
@@ -224,6 +232,86 @@
                     log(`❌ ${e}`);
                 }
             });
+
+            // --- EXPORT VAULT BUNDLE (.bsv-bundle) ---
+            document.getElementById('exportVaultBtn').addEventListener('click', () => {
+                if (!db) return log("Error: Local database initializing, please wait...");
+                const password = document.getElementById('passphrase').value;
+                if (!password) return log("Error: Enter Master Passphrase to encrypt vault bundle.");
+
+                const transaction = db.transaction(['vault_items'], 'readonly');
+                const store = transaction.objectStore('vault_items');
+                const request = store.getAll();
+
+                request.onsuccess = async () => {
+                    const items = request.result;
+                    if (items.length === 0) return log("Error: Vault is empty. Nothing to export.");
+
+                    const exportPackage = JSON.stringify({
+                        version: "1.0",
+                        exported_at: new Date().toISOString(),
+                        items: items
+                    });
+
+                    const packageBytes = new TextEncoder().encode(exportPackage);
+                    const passBytes = new TextEncoder().encode(password);
+
+                    try {
+                        const encryptedBundle = encrypt_bytes(packageBytes, passBytes);
+                        triggerDownload(encryptedBundle, `BS_Vault_Backup_${Date.now()}.bsv-bundle`, 'application/octet-stream');
+                        log(`✓ EXPORT SUCCESS: Downloaded encrypted bundle containing ${items.length} items.`);
+                    } catch (e) {
+                        log(`Export Error: ${e}`);
+                    }
+                };
+            });
+
+            // --- IMPORT VAULT BUNDLE (.bsv-bundle) ---
+            document.getElementById('importVaultBtn').addEventListener('click', () => {
+                document.getElementById('bundleFileInput').click();
+            });
+
+            document.getElementById('bundleFileInput').addEventListener('change', async (e) => {
+                if (!db) return log("Error: Local database initializing, please wait...");
+                const password = document.getElementById('passphrase').value;
+                const file = e.target.files[0];
+
+                if (!password) return log("Error: Enter Master Passphrase to decrypt and restore bundle.");
+                if (!file) return;
+
+                log(`Processing backup bundle "${file.name}"...`);
+
+                const arrayBuffer = await file.arrayBuffer();
+                const encryptedBytes = new Uint8Array(arrayBuffer);
+                const passBytes = new TextEncoder().encode(password);
+
+                try {
+                    const decryptedBytes = decrypt_bytes(encryptedBytes, passBytes);
+                    const jsonString = new TextDecoder().decode(decryptedBytes);
+                    const bundle = JSON.parse(jsonString);
+
+                    if (!bundle.items || !Array.isArray(bundle.items)) {
+                        return log("Error: Invalid bundle format.");
+                    }
+
+                    const transaction = db.transaction(['vault_items'], 'readwrite');
+                    const store = transaction.objectStore('vault_items');
+
+                    let importedCount = 0;
+                    bundle.items.forEach(item => {
+                        delete item.id; // Allow autoIncrement to generate new IDs
+                        store.add(item);
+                        importedCount++;
+                    });
+
+                    transaction.oncomplete = () => {
+                        log(`✓ RESTORE SUCCESS: Imported ${importedCount} items into Local Vault.`);
+                        loadLocalVault();
+                    };
+                } catch (err) {
+                    log(`❌ ACCESS DENIED: Incorrect passphrase or corrupted backup file.`);
+                }
+            });
         }
 
         function setupDropzone(zoneId, inputId, textId) {
@@ -277,6 +365,7 @@
         }
 
         window.decryptStoredItem = (id) => {
+            if (!db) return log("Error: Database not ready.");
             const password = document.getElementById('passphrase').value;
             if (!password) return log("Error: Type your passphrase above first to unlock this item.");
 
@@ -296,11 +385,13 @@
 
                     log(`✓ DECRYPTED ITEM:\n\nTITLE: ${payload.title}\nSECRET:\n${payload.secret}`);
                 } catch (e) {
-                    log(`❌ ACCESS DENIED: Incorrect passphrase or corrupted payload.`);                }
+                    log(`❌ ACCESS DENIED: Incorrect passphrase or corrupted payload.`);
+                }
             };
         };
 
         window.deleteStoredItem = (id) => {
+            if (!db) return log("Error: Database not ready.");
             const transaction = db.transaction(['vault_items'], 'readwrite');
             const store = transaction.objectStore('vault_items');
             store.delete(id);

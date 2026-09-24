@@ -9,6 +9,7 @@ use rpassword::prompt_password;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
+use zeroize::Zeroize;
 
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
@@ -78,10 +79,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let out_path = output.unwrap_or_else(|| PathBuf::from(format!("{}.bsv", input.display())));
 
             println!("🔒 Encrypting: {}", input.display());
-            let passphrase = prompt_password("Enter Master Passphrase: ")?;
-            let confirm_pass = prompt_password("Confirm Passphrase: ")?;
+            let mut passphrase = prompt_password("Enter Master Passphrase: ")?;
+            let mut confirm_pass = prompt_password("Confirm Passphrase: ")?;
 
             if passphrase != confirm_pass {
+                passphrase.zeroize();
+                confirm_pass.zeroize();
                 eprintln!("Error: Passphrases do not match.");
                 std::process::exit(1);
             }
@@ -95,8 +98,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut nonce_bytes = [0u8; NONCE_LEN];
             getrandom(&mut nonce_bytes).map_err(|e| format!("Nonce RNG failed: {}", e))?;
 
-            let key = derive_key_argon2id(passphrase.as_bytes(), &salt)?;
-            let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init failed: {}", e))?;
+            let mut key = derive_key_argon2id(passphrase.as_bytes(), &salt)?;
+            passphrase.zeroize();
+            confirm_pass.zeroize();
+
+            let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init failed: {}", e));
+            key.zeroize(); // Immediate terminal RAM cleanup
+            let cipher = cipher?;
+
             let nonce = Nonce::from_slice(&nonce_bytes);
 
             let ciphertext = cipher
@@ -118,12 +127,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Decrypt { input, output } => {
             println!("🔓 Decrypting: {}", input.display());
-            let passphrase = prompt_password("Enter Master Passphrase: ")?;
+            let mut passphrase = prompt_password("Enter Master Passphrase: ")?;
 
             let start = Instant::now();
             let payload = fs::read(&input)?;
 
             if payload.len() < SALT_LEN + NONCE_LEN {
+                passphrase.zeroize();
                 eprintln!("Error: Invalid or truncated .bsv payload.");
                 std::process::exit(1);
             }
@@ -132,8 +142,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let nonce_bytes = &payload[SALT_LEN..SALT_LEN + NONCE_LEN];
             let ciphertext = &payload[SALT_LEN + NONCE_LEN..];
 
-            let key = derive_key_argon2id(passphrase.as_bytes(), salt)?;
-            let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init failed: {}", e))?;
+            let mut key = derive_key_argon2id(passphrase.as_bytes(), salt)?;
+            passphrase.zeroize();
+
+            let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init failed: {}", e));
+            key.zeroize(); // Immediate terminal RAM cleanup
+            let cipher = cipher?;
+
             let nonce = Nonce::from_slice(nonce_bytes);
 
             match cipher.decrypt(nonce, ciphertext) {
