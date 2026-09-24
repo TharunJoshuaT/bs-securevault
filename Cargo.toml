@@ -6,7 +6,10 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[dependencies]
-wasm-bindgen = "0.2"
-aes-gcm = "0.10"
-getrandom = { version = "0.2.17", features = ["js"] }
+ [dependencies]
+ wasm-bindgen = "0.2"
+ aes-gcm = "0.10.3"
+ getrandom = { version = "0.2", features = ["js"] }
+ pbkdf2 = "0.12"
+ hmac = "0.12"
+ sha2 = "0.10"

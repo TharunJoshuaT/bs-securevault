@@ -1,58 +1,65 @@
-use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
-    Aes256Gcm, Nonce
-};
-use aes_gcm::aead::rand_core::RngCore;
 use wasm_bindgen::prelude::*;
+use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+use pbkdf2::pbkdf2_hmac;
+use sha2::Sha256;
+use getrandom::getrandom;
 
-/// Encrypts raw bytes (files, text, images) in-memory using AES-256-GCM.
-/// Zero server uploads — runs entirely inside the user's browser CPU via WebAssembly.
+// Cryptographic Constants
+const SALT_LEN: usize = 16;
+const NONCE_LEN: usize = 12;
+const KEY_LEN: usize = 32;
+const ITERATIONS: u32 = 100_000; // Hardened standard for PBKDF2
+
 #[wasm_bindgen]
-pub fn encrypt_bytes(data: &[u8], key_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
-    if key_bytes.len() != 32 {
-        return Err(JsValue::from_str("Encryption key must be exactly 32 bytes (256 bits)."));
-    }
+pub fn encrypt_bytes(data: &[u8], password: &[u8]) -> Result<Vec<u8>, JsValue> {
+    // 1. Generate 16 bytes of true randomness for the Salt
+    let mut salt = [0u8; SALT_LEN];
+    getrandom(&mut salt).map_err(|e| JsValue::from_str(&format!("RNG error: {}", e)))?;
 
-    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(key_bytes);
-    let cipher = Aes256Gcm::new(key);
+    // 2. Hash the user's password 100,000 times to create a strict 32-byte key
+    let mut key = [0u8; KEY_LEN];
+    pbkdf2_hmac::<Sha256>(password, &salt, ITERATIONS, &mut key);
 
-    // Generate a secure 12-byte random nonce (initialization vector)
-    let mut nonce_bytes = [0u8; 12];
-    OsRng.fill_bytes(&mut nonce_bytes);
+    // 3. Generate a 12-byte random Nonce (Initialization Vector)
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    getrandom(&mut nonce_bytes).map_err(|e| JsValue::from_str(&format!("RNG error: {}", e)))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    // Encrypt the payload
-    match cipher.encrypt(nonce, data) {
-        Ok(mut ciphertext) => {
-            // Prepend the 12-byte nonce to the encrypted data so we can decrypt it later
-            let mut result = nonce_bytes.to_vec();
-            result.append(&mut ciphertext);
-            Ok(result)
-        }
-        Err(_) => Err(JsValue::from_str("Encryption failed.")),
-    }
+    // 4. Encrypt the payload using AES-256-GCM
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| JsValue::from_str("Engine Error"))?;
+    let ciphertext = cipher.encrypt(nonce, data).map_err(|e| JsValue::from_str(&format!("Encryption failed: {}", e)))?;
+
+    // 5. Package the final payload: [Salt (16)] + [Nonce (12)] + [Ciphertext]
+    let mut result = Vec::with_capacity(SALT_LEN + NONCE_LEN + ciphertext.len());
+    result.extend_from_slice(&salt);
+    result.extend_from_slice(&nonce_bytes);
+    result.extend_from_slice(&ciphertext);
+
+    Ok(result)
 }
 
-/// Decrypts AES-256-GCM encrypted bytes in-memory.
 #[wasm_bindgen]
-pub fn decrypt_bytes(encrypted_data: &[u8], key_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
-    if key_bytes.len() != 32 {
-        return Err(JsValue::from_str("Decryption key must be exactly 32 bytes (256 bits)."));
+pub fn decrypt_bytes(encrypted_data: &[u8], password: &[u8]) -> Result<Vec<u8>, JsValue> {
+    // Ensure the payload is at least large enough to hold our Salt and Nonce
+    if encrypted_data.len() < SALT_LEN + NONCE_LEN {
+        return Err(JsValue::from_str("Payload corrupted: too short."));
     }
 
-    if encrypted_data.len() < 12 {
-        return Err(JsValue::from_str("Invalid payload: Data too short."));
-    }
+    // 1. Unpack the Salt, Nonce, and Ciphertext from the raw bytes
+    let salt = &encrypted_data[0..SALT_LEN];
+    let nonce_bytes = &encrypted_data[SALT_LEN..SALT_LEN + NONCE_LEN];
+    let ciphertext = &encrypted_data[SALT_LEN + NONCE_LEN..];
 
-    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(key_bytes);
-    let cipher = Aes256Gcm::new(key);
+    // 2. Re-derive the exact 32-byte master key using the extracted Salt
+    let mut key = [0u8; KEY_LEN];
+    pbkdf2_hmac::<Sha256>(password, salt, ITERATIONS, &mut key);
 
-    // Extract the 12-byte nonce from the front of the data
-    let (nonce_bytes, ciphertext) = encrypted_data.split_at(12);
+    // 3. Initialize the decryption engine
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| JsValue::from_str("Engine Error"))?;
     let nonce = Nonce::from_slice(nonce_bytes);
+    
+    // 4. Decrypt and verify authenticity
+    let plaintext = cipher.decrypt(nonce, ciphertext).map_err(|_| JsValue::from_str("ACCESS DENIED: Incorrect password or corrupted payload."))?;
 
-    match cipher.decrypt(nonce, ciphertext) {
-        Ok(plaintext) => Ok(plaintext),
-        Err(_) => Err(JsValue::from_str("Decryption failed: Incorrect password or corrupted payload.")),
-    }
+    Ok(plaintext)
 }
