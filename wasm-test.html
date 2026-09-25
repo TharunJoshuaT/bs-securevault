@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>BS SecureVault - WASM Test Bench</title>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; background: #0d1117; color: #c9d1d9; padding: 2rem; max-width: 800px; margin: 0 auto; line-height: 1.6; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }
+        h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 0.5rem; }
+        h2 { color: #f0f6fc; margin-top: 0; }
+        button, input { padding: 0.6rem 1rem; margin: 0.5rem 0; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #fff; font-size: 1rem; width: 100%; box-sizing: border-box; }
+        button { background: #238636; cursor: pointer; font-weight: bold; width: auto; }
+        button:hover { background: #2ea043; }
+        pre { background: #010409; padding: 1rem; border-radius: 6px; overflow-x: auto; color: #7ee787; border: 1px solid #30363d; font-family: monospace; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>BS SecureVault - WASM Test Bench</h1>
+
+    <!-- TEST 1: IN-MEMORY WASM -->
+    <div class="card">
+        <h2>Phase 2: In-Browser WASM Engine Self-Test</h2>
+        <p>Encrypts and decrypts a test string directly in WebAssembly memory.</p>
+        <button id="btnRunTest">Run WASM Self-Test</button>
+        <pre id="selfTestLog">Click button to run test...</pre>
+    </div>
+
+    <!-- TEST 2: CROSS DECRYPTION -->
+    <div class="card">
+        <h2>Phase 3: Decrypt Terminal File (.bsv) in Web Browser</h2>
+        <p>Select the <code>.bsv</code> file created in terminal:</p>
+        <input type="file" id="fileInput" accept=".bsv" />
+        <input type="password" id="passphraseInput" placeholder="Enter the passphrase you typed in terminal" />
+        <button id="btnDecryptFile">Decrypt Terminal File in Browser</button>
+        <pre id="fileDecryptLog">Awaiting file selection...</pre>
+    </div>
+
+    <script type="module">
+        import init, { encrypt_bytes, decrypt_bytes } from './pkg/bs_securevault.js';
+
+        let wasmReady = false;
+
+        async function initWasm() {
+            if (!wasmReady) {
+                await init();
+                wasmReady = true;
+            }
+        }
+
+        // Test 1: In-Memory WASM
+        document.getElementById('btnRunTest').addEventListener('click', async () => {
+            const log = document.getElementById('selfTestLog');
+            log.textContent = "Initializing WASM module...";
+
+            try {
+                await initWasm();
+                const pass = new TextEncoder().encode("VaultPass2026!");
+                const secretText = "Hello from WebAssembly Linear Memory!";
+                const plaintext = new TextEncoder().encode(secretText);
+
+                log.textContent += "\n[1] Encrypting string with Argon2id + AES-256-GCM...";
+                const encrypted = encrypt_bytes(plaintext, pass);
+                log.textContent += `\n    -> Success! Encrypted payload: ${encrypted.length} bytes`;
+
+                log.textContent += "\n[2] Decrypting back in WASM...";
+                const decrypted = decrypt_bytes(encrypted, pass);
+                const restoredStr = new TextDecoder().decode(decrypted);
+
+                log.textContent += `\n    -> Restored Output: "${restoredStr}"`;
+                log.textContent += "\n\nSUCCESS: PHASE 2 IN-MEMORY WASM TEST PASSED!";
+            } catch (err) {
+                log.textContent += `\nERROR: ${err.message || err}`;
+            }
+        });
+
+        // Test 2: Decrypt File from Terminal
+        document.getElementById('btnDecryptFile').addEventListener('click', async () => {
+            const log = document.getElementById('fileDecryptLog');
+            const fileInput = document.getElementById('fileInput');
+            const passInput = document.getElementById('passphraseInput');
+
+            if (!fileInput.files.length) {
+                alert("Please select secret.txt.bsv first!");
+                return;
+            }
+            if (!passInput.value) {
+                alert("Please enter the master passphrase you used in the terminal!");
+                return;
+            }
+
+            log.textContent = "Loading terminal file into WebAssembly memory...";
+
+            try {
+                await initWasm();
+                const file = fileInput.files[0];
+                const arrayBuffer = await file.arrayBuffer();
+                const encryptedBytes = new Uint8Array(arrayBuffer);
+                const passBytes = new TextEncoder().encode(passInput.value);
+
+                log.textContent += `\n[1] Loaded "${file.name}" (${encryptedBytes.length} bytes)`;
+                log.textContent += "\n[2] Running WASM decrypt_bytes()...";
+
+                const decryptedBytes = decrypt_bytes(encryptedBytes, passBytes);
+                const restoredText = new TextDecoder().decode(decryptedBytes);
+
+                log.textContent += `\n\nSUCCESS: DECRYPTED CONTENT FROM TERMINAL:\n-----------------------------------\n${restoredText}\n-----------------------------------`;
+                log.textContent += "\n\nSUCESS: PHASE 3 CROSS-COMPATIBILITY SUCCESSFUL!";
+            } catch (err) {
+                log.textContent += `\nDECRYPTION FAILED: ${err.message || err}\nCheck if the passphrase matches what you typed in terminal!`;
+            }
+        });
+    </script>
+</body>
+</html>

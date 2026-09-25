@@ -5,14 +5,15 @@ use aes_gcm::{
 };
 use argon2::{Argon2, ParamsBuilder};
 use getrandom::getrandom;
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
 const KEY_LEN: usize = 32;
 
-fn derive_key_argon2id(passphrase: &[u8], salt: &[u8]) -> Result<[u8; KEY_LEN], String> {
-    let mut key = [0u8; KEY_LEN];
+fn derive_key_argon2id(passphrase: &[u8], salt: &[u8]) -> Result<Zeroizing<[u8; KEY_LEN]>, String> {
+    // Zeroizing wrapper automatically zeroes buffer when dropped
+    let mut key = Zeroizing::new([0u8; KEY_LEN]);
 
     let params = ParamsBuilder::new()
         .m_cost(19456)
@@ -29,7 +30,7 @@ fn derive_key_argon2id(passphrase: &[u8], salt: &[u8]) -> Result<[u8; KEY_LEN], 
     );
 
     argon2
-        .hash_password_into(passphrase, salt, &mut key)
+        .hash_password_into(passphrase, salt, key.as_mut_slice())
         .map_err(|e| format!("Key derivation failed: {}", e))?;
 
     Ok(key)
@@ -43,13 +44,14 @@ pub fn encrypt_bytes(data: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, JsValue>
     let mut nonce_bytes = [0u8; NONCE_LEN];
     getrandom(&mut nonce_bytes).map_err(|e| JsValue::from_str(&format!("Nonce RNG failed: {}", e)))?;
 
-    // Derive key and zeroize key buffer immediately after cipher instantiation
-    let mut key = derive_key_argon2id(passphrase, &salt).map_err(|e| JsValue::from_str(&e))?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| JsValue::from_str(&format!("Cipher init failed: {}", e)));
+    // Derive key wrapped in Zeroizing container
+    let key = derive_key_argon2id(passphrase, &salt).map_err(|e| JsValue::from_str(&e))?;
     
-    key.zeroize(); // Overwrite WASM key memory with zeroes
-    let cipher = cipher?;
+    let cipher = Aes256Gcm::new_from_slice(key.as_slice())
+        .map_err(|e| JsValue::from_str(&format!("Cipher init failed: {}", e)))?;
+
+    // Explicitly drop key to zeroize key memory immediately
+    drop(key);
 
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
@@ -74,13 +76,13 @@ pub fn decrypt_bytes(payload: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, JsVal
     let nonce_bytes = &payload[SALT_LEN..SALT_LEN + NONCE_LEN];
     let ciphertext = &payload[SALT_LEN + NONCE_LEN..];
 
-    // Derive key and zeroize key buffer immediately after cipher instantiation
-    let mut key = derive_key_argon2id(passphrase, salt).map_err(|e| JsValue::from_str(&e))?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| JsValue::from_str(&format!("Cipher init failed: {}", e)));
+    let key = derive_key_argon2id(passphrase, salt).map_err(|e| JsValue::from_str(&e))?;
+    
+    let cipher = Aes256Gcm::new_from_slice(key.as_slice())
+        .map_err(|e| JsValue::from_str(&format!("Cipher init failed: {}", e)))?;
 
-    key.zeroize(); // Overwrite WASM key memory with zeroes
-    let cipher = cipher?;
+    // Explicitly drop key to zeroize key memory immediately
+    drop(key);
 
     let nonce = Nonce::from_slice(nonce_bytes);
     let plaintext = cipher

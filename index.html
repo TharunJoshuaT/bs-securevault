@@ -30,7 +30,6 @@
             background: #30363d !important;
             color: #ffffff !important;
         }
-
         #importVaultBtn:hover {
             background: #21262d !important;
             color: #c9d1d9 !important;
@@ -172,16 +171,18 @@
         function lockAndZeroizeVault() {
             const passInput = document.getElementById('passphrase');
             const textInput = document.getElementById('textPayload');
+            const titleInput = document.getElementById('noteTitle');
 
             if (passInput) passInput.value = '';
             if (textInput) textInput.value = '';
+            if (titleInput) titleInput.value = '';
 
             currentTextCipherBytes = null;
-            log("🔒 VAULT AUTO-LOCKED: Inactivity threshold (3m) reached. Passphrase and memory state zeroized.");
+            log("🔒 VAULT AUTO-LOCKED: Inactivity threshold reached or tab hidden. Memory state zeroized.");
         }
 
         function initAutoLockMonitor() {
-            ['mousemove', 'keydown', 'touchstart', 'scroll'].forEach(evt => {
+            ['mousemove', 'keydown', 'click', 'touchstart', 'scroll'].forEach(evt => {
                 window.addEventListener(evt, resetInactivityTimer, { passive: true });
             });
 
@@ -496,7 +497,7 @@
 
         function triggerDownload(bytes, filename, mimeType) {
             const blob = new Blob([bytes], { type: mimeType });
-            const link = document.getElementById('downloadLink') || document.createElement('a');
+            const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = filename;
             link.click();
@@ -508,46 +509,6 @@
         }
 
         start();
-    </script>
-    
-    <script>
-        // Security Auto-Lock Monitor (3-Minute Inactivity Timeout)
-        (function initAutoLock() {
-            const IDLE_TIMEOUT_MS = 3 * 60 * 1000; // 3 Minutes
-            let idleTimer;
-
-            function resetIdleTimer() {
-                clearTimeout(idleTimer);
-                idleTimer = setTimeout(lockVault, IDLE_TIMEOUT_MS);
-            }
-
-            function lockVault() {
-                const passphraseInput = document.getElementById('passphrase');
-                if (passphraseInput && passphraseInput.value.length > 0) {
-                    passphraseInput.value = '';
-                    
-                    // Clear active text inputs
-                    const secretContent = document.getElementById('secretContent');
-                    if (secretContent) secretContent.value = '';
-                    
-                    const noteTitle = document.getElementById('noteTitle');
-                    if (noteTitle) noteTitle.value = '';
-
-                    // Log lock status
-                    const logBox = document.getElementById('log');
-                    if (logBox) {
-                        logBox.textContent = `[${new Date().toLocaleTimeString()}] 🔒 AUTO-LOCK: Vault cleared and secured due to inactivity.\n` + logBox.textContent;
-                    }
-                }
-            }
-
-            // Listen for user activity
-            ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(evt => {
-                window.addEventListener(evt, resetIdleTimer, true);
-            });
-
-            resetIdleTimer();
-        })();
     </script>
 </body>
 </html>

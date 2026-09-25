@@ -22,43 +22,50 @@ self.onmessage = async (e) => {
         return self.postMessage({ id, type: 'ERROR', error: 'WASM engine is still loading.' });
     }
 
-    try {
-        if (type === 'ENCRYPT') {
-            const { dataBytes, passBytes } = payload;
-            const startTime = performance.now();
-            
-            // Rust WASM Encryption
-            const encrypted = encrypt_bytes(dataBytes, passBytes);
-            const duration = performance.now() - startTime;
+    if (type === 'ENCRYPT') {
+        const { dataBytes, passBytes } = payload;
+        const startTime = performance.now();
+        let encrypted = null;
 
-            // Zeroize passphrase copy in worker memory
-            if (passBytes && passBytes.fill) passBytes.fill(0);
+        try {
+            // Rust WASM Encryption
+            encrypted = encrypt_bytes(dataBytes, passBytes);
+            const duration = (performance.now() - startTime).toFixed(2);
 
             self.postMessage({
                 id,
                 type: 'ENCRYPT_SUCCESS',
                 result: encrypted,
-                duration: duration.toFixed(2)
+                duration: duration
             }, [encrypted.buffer]);
-
-        } else if (type === 'DECRYPT') {
-            const { dataBytes, passBytes } = payload;
-            const startTime = performance.now();
-
-            // Rust WASM Decryption
-            const decrypted = decrypt_bytes(dataBytes, passBytes);
-            const duration = performance.now() - startTime;
-
+        } catch (err) {
+            self.postMessage({ id, type: 'ERROR', error: String(err) });
+        } finally {
+            // Guaranteed zeroization even if encrypt_bytes throws
             if (passBytes && passBytes.fill) passBytes.fill(0);
+        }
+
+    } else if (type === 'DECRYPT') {
+        const { dataBytes, passBytes } = payload;
+        const startTime = performance.now();
+        let decrypted = null;
+
+        try {
+            // Rust WASM Decryption
+            decrypted = decrypt_bytes(dataBytes, passBytes);
+            const duration = (performance.now() - startTime).toFixed(2);
 
             self.postMessage({
                 id,
                 type: 'DECRYPT_SUCCESS',
                 result: decrypted,
-                duration: duration.toFixed(2)
+                duration: duration
             }, [decrypted.buffer]);
+        } catch (err) {
+            self.postMessage({ id, type: 'ERROR', error: String(err) });
+        } finally {
+            // Guaranteed zeroization even if decrypt_bytes throws
+            if (passBytes && passBytes.fill) passBytes.fill(0);
         }
-    } catch (err) {
-        self.postMessage({ id, type: 'ERROR', error: String(err) });
     }
 };

@@ -15,6 +15,20 @@
  aes-gcm = "0.10"
  argon2 = "0.5"
  getrandom = { version = "0.2", features = ["js"] }
+ zeroize = "1.7"
+
+ # CLI-only dependencies (Ignored during WASM compilation)
+ [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
  clap = { version = "4.4", features = ["derive"] }
  rpassword = "7.3"
- zeroize = "1.7"
+
+ [profile.release]
+ opt-level = "z"     # Optimize for minimum binary size
+ lto = true          # Link-Time Optimization
+ codegen-units = 1   # Single codegen unit for maximum optimization
+ panic = "abort"     # Drop panic unwinding code
+ strip = true        # Strip debug symbols
+
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
