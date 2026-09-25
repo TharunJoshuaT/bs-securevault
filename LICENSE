@@ -1,0 +1,26 @@
+BS OS SE PROPRIETARY SOURCE-AVAILABLE LICENSE
+
+Copyright (c) 2026 BS Operating Systems and Software Engines (BS OS SE). All Rights Reserved.
+
+1. DEFINITIONS
+"Software" refers to the source code, binaries, WebAssembly modules, container specifications (.bsv), documentation, and associated assets created by BS Operating Systems and Software Engines.
+"Licensor" refers to BS Operating Systems and Software Engines (BS OS SE).
+
+2. PERMITTED USES
+Subject to the terms of this License, Licensor grants you a non-exclusive, non-transferable, limited right to:
+   a) Inspect, view, and compile the source code solely for security auditing, educational analysis, and personal verification.
+   b) Run the provided binary tools on personal computing devices for non-commercial evaluation.
+
+3. PROHIBITED USES
+You are strictly prohibited from performing any of the following acts without prior explicit written permission from BS Operating Systems and Software Engines:
+   a) Copying, duplicating, cloning, or distributing the source code, binaries, or documentation, in whole or in part, to any public or private platform.
+   b) Modifying, altering, translating, adapting, or creating derivative works based upon the Software or the .bsv container framing specification.
+   c) Sublicensing, renting, leasing, selling, hosting as a paid service, or otherwise commercializing the Software or any component thereof.
+   d) Reverse engineering, decompiling, or disassembling compiled binaries or WebAssembly artifacts for the purpose of reproducing the Software's proprietary architecture.
+   e) Using the name, trademarks, logos, or brand identifiers of "BS OS SE", "BS Operating Systems and Software Engines", or "BS SecureVault" in connection with any third-party product or service.
+
+4. NO WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL BS OPERATING SYSTEMS AND SOFTWARE ENGINES BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+5. TERMINATION
+Any violation of the terms of this License automatically terminates your permission to inspect or use the Software. Licensor reserves all rights to seek legal remedies, injunctive relief, and monetary damages under applicable copyright laws.
