@@ -1,0 +1,15 @@
+{
+  "name": "bs-securevault",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "bs_securevault_bg.wasm",
+    "bs_securevault.js",
+    "bs_securevault.d.ts"
+  ],
+  "main": "bs_securevault.js",
+  "types": "bs_securevault.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
