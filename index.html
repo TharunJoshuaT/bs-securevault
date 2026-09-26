@@ -100,6 +100,19 @@
             <button id="saveVaultBtn">Encrypt & Save (Zero-Knowledge DB)</button>
         </div>
     </div>
+    <div class="mt-6 border-t border-gray-700 pt-4">
+        <label class="block text-sm font-medium mb-1">Decrypt Raw Bytes:</label>
+        <textarea id="decrypt-text-input"
+                  class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-gray-300 font-mono"
+                  rows="3"
+                  placeholder="Paste comma-separated bytes here (e.g., 69,17,42...)"></textarea>
+        
+        <!-- Using blue to match your Section 2 file decrypt button -->
+        <button id="btn-decrypt-text"
+                class="mt-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+            Decrypt & Display Text
+        </button>
+    </div>
 
     <!-- Section 2: File Vault -->
     <div class="box">
@@ -266,6 +279,34 @@
                     log(`Error: ${e.message}`);
                 }
             });
+            
+            // --- TEXT DECRYPTION (RAW BYTES) ---
+                        document.getElementById('btn-decrypt-text').addEventListener('click', async () => {
+                            const password = document.getElementById('passphrase').value;
+                            const rawBytesStr = document.getElementById('decrypt-text-input').value.trim();
+
+                            if (!password) return log("Error: Passphrase required.");
+                            if (!rawBytesStr) return log("Error: Paste encrypted raw bytes first.");
+
+                            try {
+                                // 1. Convert comma-separated string back to Uint8Array
+                                const byteArray = new Uint8Array(rawBytesStr.split(',').map(num => parseInt(num.trim(), 10)));
+                                const passBytes = new TextEncoder().encode(password);
+
+                                // 2. Send to WASM Worker
+                                const { result, duration } = await runInWorker('DECRYPT', {
+                                    dataBytes: byteArray,
+                                    passBytes: passBytes
+                                }, [byteArray.buffer, passBytes.buffer]);
+
+                                // 3. Convert decrypted bytes back to string
+                                const originalText = new TextDecoder().decode(result);
+                                
+                                log(`✓ TEXT DECRYPTED SUCCESS (${duration} ms):\n\n${originalText}`);
+                            } catch (e) {
+                                log(`❌ ACCESS DENIED / ERROR: Incorrect passphrase or corrupted data.`);
+                            }
+                        });
 
             // --- SAVE TO INDEXEDDB ---
             document.getElementById('saveVaultBtn').addEventListener('click', async () => {
