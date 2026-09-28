@@ -591,5 +591,19 @@
 
         start();
     </script>
+    <!-- BS SecureVault Offline PWA Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((registration) => {
+              console.log('BS SecureVault SW registered successfully with scope:', registration.scope);
+            })
+            .catch((error) => {
+              console.error('BS SecureVault SW registration failed:', error);
+            });
+        });
+      }
+    </script>
 </body>
 </html>
