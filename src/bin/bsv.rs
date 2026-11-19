@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start = Instant::now();
             let data = fs::read(&input)?;
 
-            let encrypted = match bs_securevault::encrypt_bytes(&data, passphrase.as_bytes()) {
+            let encrypted = match bs_securevault::encrypt_core(&data, passphrase.as_bytes()) {
                 Ok(buf) => {
                     passphrase.zeroize();
                     buf
@@ -87,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let start = Instant::now();
             let payload = fs::read(&input)?;
 
-            let plaintext = match bs_securevault::decrypt_bytes(&payload, passphrase.as_bytes()) {
+            let plaintext = match bs_securevault::decrypt_core(&payload, passphrase.as_bytes()) {
                 Ok(buf) => {
                     passphrase.zeroize();
                     buf
