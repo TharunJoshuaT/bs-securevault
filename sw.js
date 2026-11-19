@@ -1,6 +1,6 @@
 const CACHE_NAME = 'bs-securevault-v1';
 
-// List all core static assets required to run the vault offline
+// core static assets required to run the vault offline
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

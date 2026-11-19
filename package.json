@@ -1,0 +1,36 @@
+{
+  "name": "bs-securevault",
+  "version": "1.0.0",
+  "description": "Sovereign, zero-knowledge AES-256-GCM and Argon2id offline-first encryption engine compiled to WebAssembly.",
+  "main": "pkg/bs_securevault.js",
+  "module": "pkg/bs_securevault_bg.wasm",
+  "types": "pkg/bs_securevault.d.ts",
+  "files": [
+    "pkg",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:wasm": "wasm-pack build --target bundler --out-dir pkg",
+    "build:node": "wasm-pack build --target nodejs --out-dir pkg-node",
+    "prepublishOnly": "npm run build:wasm",
+    "test": "node scripts/test-wasm.js"
+  },
+  "keywords": [
+    "encryption",
+    "wasm",
+    "rust",
+    "webassembly",
+    "aes-256-gcm",
+    "argon2id",
+    "zero-knowledge",
+    "security",
+    "bs-os-se"
+  ],
+  "author": "Tharun Joshua T <bllnrsqddmn@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bsassociatesint/bs-securevault.git"
+  }
+}
